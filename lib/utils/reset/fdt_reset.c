@@ -13,42 +13,35 @@
 #include <sbi_utils/fdt/fdt_helper.h>
 #include <sbi_utils/reset/fdt_reset.h>
 
-extern struct fdt_reset fdt_poweroff_gpio;
-extern struct fdt_reset fdt_reset_gpio;
-extern struct fdt_reset fdt_reset_htif;
-extern struct fdt_reset fdt_reset_sifive_test;
-extern struct fdt_reset fdt_reset_sunxi_wdt;
-extern struct fdt_reset fdt_reset_thead;
+/* List of FDT reset drivers generated at compile time */
+extern struct fdt_reset *fdt_reset_drivers[];
+extern unsigned long fdt_reset_drivers_size;
 
-static struct fdt_reset *reset_drivers[] = {
-	&fdt_poweroff_gpio,
-	&fdt_reset_gpio,
-	&fdt_reset_htif,
-	&fdt_reset_sifive_test,
-	&fdt_reset_sunxi_wdt,
-	&fdt_reset_thead,
-};
+int fdt_reset_driver_init(void *fdt, struct fdt_reset *drv)
+{
+	int noff, rc = SBI_ENODEV;
+	const struct fdt_match *match;
+
+	noff = fdt_find_match(fdt, -1, drv->match_table, &match);
+	if (noff < 0)
+		return SBI_ENODEV;
+
+	if (drv->init) {
+		rc = drv->init(fdt, noff, match);
+		if (rc && rc != SBI_ENODEV) {
+			sbi_printf("%s: %s init failed, %d\n",
+				   __func__, match->compatible, rc);
+		}
+	}
+
+	return rc;
+}
 
 void fdt_reset_init(void)
 {
-	int pos, noff, rc;
-	struct fdt_reset *drv;
-	const struct fdt_match *match;
+	int pos;
 	void *fdt = fdt_get_address();
 
-	for (pos = 0; pos < array_size(reset_drivers); pos++) {
-		drv = reset_drivers[pos];
-
-		noff = fdt_find_match(fdt, -1, drv->match_table, &match);
-		if (noff < 0)
-			continue;
-
-		if (drv->init) {
-			rc = drv->init(fdt, noff, match);
-			if (rc && rc != SBI_ENODEV) {
-				sbi_printf("%s: %s init failed, %d\n",
-					   __func__, match->compatible, rc);
-			}
-		}
-	}
+	for (pos = 0; pos < fdt_reset_drivers_size; pos++)
+		fdt_reset_driver_init(fdt, fdt_reset_drivers[pos]);
 }

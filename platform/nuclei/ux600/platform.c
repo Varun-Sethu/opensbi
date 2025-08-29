@@ -8,7 +8,6 @@
  *   hqfang <578567190@qq.com>
  */
 
-#include <libfdt.h>
 #include <sbi/riscv_asm.h>
 #include <sbi/riscv_io.h>
 #include <sbi/riscv_encoding.h>
@@ -40,6 +39,8 @@
 					 CLINT_MTIMER_OFFSET)
 
 #define UX600_PLIC_ADDR			0x8000000
+#define UX600_PLIC_SIZE			(0x200000 + \
+					 (UX600_HART_COUNT * 0x1000))
 #define UX600_PLIC_NUM_SOURCES		0x35
 #define UX600_PLIC_NUM_PRIORITIES	7
 
@@ -64,6 +65,7 @@ static u32 ux600_clk_freq = 8000000;
 
 static struct plic_data plic = {
 	.addr = UX600_PLIC_ADDR,
+	.size = UX600_PLIC_SIZE,
 	.num_src = UX600_PLIC_NUM_SOURCES,
 };
 
@@ -84,7 +86,7 @@ static struct aclint_mtimer_data mtimer = {
 	.mtimecmp_size = ACLINT_DEFAULT_MTIMECMP_SIZE,
 	.first_hartid = 0,
 	.hart_count = UX600_HART_COUNT,
-	.has_64bit_mmio = TRUE,
+	.has_64bit_mmio = true,
 };
 
 static u32 measure_cpu_freq(u32 n)
@@ -245,5 +247,7 @@ const struct sbi_platform platform = {
 	.features		= SBI_PLATFORM_DEFAULT_FEATURES,
 	.hart_count		= UX600_HART_COUNT,
 	.hart_stack_size	= SBI_PLATFORM_DEFAULT_HART_STACK_SIZE,
+	.heap_size		=
+			SBI_PLATFORM_DEFAULT_HEAP_SIZE(UX600_HART_COUNT),
 	.platform_ops_addr	= (unsigned long)&platform_ops
 };

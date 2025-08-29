@@ -13,6 +13,9 @@
 #include <sbi/sbi_error.h>
 #include <sbi/sbi_trap.h>
 
+extern struct sbi_ecall_extension *sbi_ecall_exts[];
+extern unsigned long sbi_ecall_exts_size;
+
 u16 sbi_ecall_version_major(void)
 {
 	return SBI_ECALL_VERSION_MAJOR;
@@ -75,7 +78,7 @@ int sbi_ecall_register_extension(struct sbi_ecall_extension *ext)
 
 void sbi_ecall_unregister_extension(struct sbi_ecall_extension *ext)
 {
-	bool found = FALSE;
+	bool found = false;
 	struct sbi_ecall_extension *t;
 
 	if (!ext)
@@ -83,7 +86,7 @@ void sbi_ecall_unregister_extension(struct sbi_ecall_extension *ext)
 
 	sbi_list_for_each_entry(t, &ecall_exts_list, head) {
 		if (t == ext) {
-			found = TRUE;
+			found = true;
 			break;
 		}
 	}
@@ -98,14 +101,12 @@ int sbi_ecall_handler(struct sbi_trap_regs *regs)
 	struct sbi_ecall_extension *ext;
 	unsigned long extension_id = regs->a7;
 	unsigned long func_id = regs->a6;
-	struct sbi_trap_info trap = {0};
-	unsigned long out_val = 0;
+	struct sbi_ecall_return out = {0};
 	bool is_0_1_spec = 0;
 
 	ext = sbi_ecall_find_extension(extension_id);
 	if (ext && ext->handle) {
-		ret = ext->handle(extension_id, func_id,
-				  regs, &out_val, &trap);
+		ret = ext->handle(extension_id, func_id, regs, &out);
 		if (extension_id >= SBI_EXT_0_1_SET_TIMER &&
 		    extension_id <= SBI_EXT_0_1_SHUTDOWN)
 			is_0_1_spec = 1;
@@ -113,11 +114,10 @@ int sbi_ecall_handler(struct sbi_trap_regs *regs)
 		ret = SBI_ENOTSUPP;
 	}
 
-	if (ret == SBI_ETRAP) {
-		trap.epc = regs->mepc;
-		sbi_trap_redirect(regs, &trap);
-	} else {
-		if (ret < SBI_LAST_ERR) {
+	if (!out.skip_regs_update) {
+		if (ret < SBI_LAST_ERR ||
+		    (extension_id != SBI_EXT_0_1_CONSOLE_GETCHAR &&
+		     SBI_SUCCESS < ret)) {
 			sbi_printf("%s: Invalid error %d for ext=0x%lx "
 				   "func=0x%lx\n", __func__, ret,
 				   extension_id, func_id);
@@ -135,7 +135,7 @@ int sbi_ecall_handler(struct sbi_trap_regs *regs)
 		regs->mepc += 4;
 		regs->a0 = ret;
 		if (!is_0_1_spec)
-			regs->a1 = out_val;
+			regs->a1 = out.value;
 	}
 
 	return 0;
@@ -144,35 +144,18 @@ int sbi_ecall_handler(struct sbi_trap_regs *regs)
 int sbi_ecall_init(void)
 {
 	int ret;
+	struct sbi_ecall_extension *ext;
+	unsigned long i;
 
-	/* The order of below registrations is performance optimized */
-	ret = sbi_ecall_register_extension(&ecall_time);
-	if (ret)
-		return ret;
-	ret = sbi_ecall_register_extension(&ecall_rfence);
-	if (ret)
-		return ret;
-	ret = sbi_ecall_register_extension(&ecall_ipi);
-	if (ret)
-		return ret;
-	ret = sbi_ecall_register_extension(&ecall_base);
-	if (ret)
-		return ret;
-	ret = sbi_ecall_register_extension(&ecall_hsm);
-	if (ret)
-		return ret;
-	ret = sbi_ecall_register_extension(&ecall_srst);
-	if (ret)
-		return ret;
-	ret = sbi_ecall_register_extension(&ecall_pmu);
-	if (ret)
-		return ret;
-	ret = sbi_ecall_register_extension(&ecall_legacy);
-	if (ret)
-		return ret;
-	ret = sbi_ecall_register_extension(&ecall_vendor);
-	if (ret)
-		return ret;
+	for (i = 0; i < sbi_ecall_exts_size; i++) {
+		ext = sbi_ecall_exts[i];
+		ret = SBI_ENODEV;
+
+		if (ext->register_extensions)
+			ret = ext->register_extensions();
+		if (ret)
+			return ret;
+	}
 
 	return 0;
 }

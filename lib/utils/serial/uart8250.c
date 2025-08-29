@@ -7,8 +7,10 @@
  *   Anup Patel <anup.patel@wdc.com>
  */
 
+#include <sbi/riscv_asm.h>
 #include <sbi/riscv_io.h>
 #include <sbi/sbi_console.h>
+#include <sbi/sbi_domain.h>
 #include <sbi_utils/serial/uart8250.h>
 
 /* clang-format off */
@@ -39,7 +41,7 @@
 
 /* clang-format on */
 
-static volatile void *uart8250_base;
+static volatile char *uart8250_base;
 static u32 uart8250_in_freq;
 static u32 uart8250_baudrate;
 static u32 uart8250_reg_width;
@@ -91,17 +93,20 @@ static struct sbi_console_device uart8250_console = {
 };
 
 int uart8250_init(unsigned long base, u32 in_freq, u32 baudrate, u32 reg_shift,
-		  u32 reg_width)
+		  u32 reg_width, u32 reg_offset)
 {
-	u16 bdiv;
+	u16 bdiv = 0;
 
-	uart8250_base      = (volatile void *)base;
+	uart8250_base      = (volatile char *)base + reg_offset;
 	uart8250_reg_shift = reg_shift;
 	uart8250_reg_width = reg_width;
 	uart8250_in_freq   = in_freq;
 	uart8250_baudrate  = baudrate;
 
-	bdiv = uart8250_in_freq / (16 * uart8250_baudrate);
+	if (uart8250_baudrate) {
+		bdiv = (uart8250_in_freq + 8 * uart8250_baudrate) /
+		       (16 * uart8250_baudrate);
+	}
 
 	/* Disable all interrupts */
 	set_reg(UART_IER_OFFSET, 0x00);
@@ -130,5 +135,7 @@ int uart8250_init(unsigned long base, u32 in_freq, u32 baudrate, u32 reg_shift,
 
 	sbi_console_set_device(&uart8250_console);
 
-	return 0;
+	return sbi_domain_root_add_memrange(base, PAGE_SIZE, PAGE_SIZE,
+					    (SBI_DOMAIN_MEMREGION_MMIO |
+					    SBI_DOMAIN_MEMREGION_SHARED_SURW_MRW));
 }

@@ -24,7 +24,7 @@ static bool hpm_allowed(int hpm_num, ulong prev_mode, bool virt)
 	struct sbi_scratch *scratch = sbi_scratch_thishart_ptr();
 
 	if (prev_mode <= PRV_S) {
-		if (sbi_hart_has_feature(scratch, SBI_HART_HAS_MCOUNTEREN)) {
+		if (sbi_hart_priv_version(scratch) >= SBI_HART_PRIV_VER_1_10) {
 			cen &= csr_read(CSR_MCOUNTEREN);
 			if (virt)
 				cen &= csr_read(CSR_HCOUNTEREN);
@@ -33,13 +33,13 @@ static bool hpm_allowed(int hpm_num, ulong prev_mode, bool virt)
 		}
 	}
 	if (prev_mode == PRV_U) {
-		if (sbi_hart_has_feature(scratch, SBI_HART_HAS_SCOUNTEREN))
+		if (sbi_hart_priv_version(scratch) >= SBI_HART_PRIV_VER_1_10)
 			cen &= csr_read(CSR_SCOUNTEREN);
 		else
 			cen = 0;
 	}
 
-	return ((cen >> hpm_num) & 1) ? TRUE : FALSE;
+	return ((cen >> hpm_num) & 1) ? true : false;
 }
 
 int sbi_emulate_csr_read(int csr_num, struct sbi_trap_regs *regs,
@@ -49,9 +49,9 @@ int sbi_emulate_csr_read(int csr_num, struct sbi_trap_regs *regs,
 	struct sbi_scratch *scratch = sbi_scratch_thishart_ptr();
 	ulong prev_mode = (regs->mstatus & MSTATUS_MPP) >> MSTATUS_MPP_SHIFT;
 #if __riscv_xlen == 32
-	bool virt = (regs->mstatusH & MSTATUSH_MPV) ? TRUE : FALSE;
+	bool virt = (regs->mstatusH & MSTATUSH_MPV) ? true : false;
 #else
-	bool virt = (regs->mstatus & MSTATUS_MPV) ? TRUE : FALSE;
+	bool virt = (regs->mstatus & MSTATUS_MPV) ? true : false;
 #endif
 
 	switch (csr_num) {
@@ -117,7 +117,7 @@ int sbi_emulate_csr_read(int csr_num, struct sbi_trap_regs *regs,
 
 #define switchcase_hpm(__uref, __mref, __csr)				\
 	case __csr:							\
-		if ((sbi_hart_mhpm_count(scratch) + 3) <= (__csr - __uref))\
+		if (sbi_hart_mhpm_mask(scratch) & (1 << (__csr - __uref)))\
 			return SBI_ENOTSUPP;				\
 		if (!hpm_allowed(__csr - __uref, prev_mode, virt))	\
 			return SBI_ENOTSUPP;				\
@@ -157,7 +157,7 @@ int sbi_emulate_csr_read(int csr_num, struct sbi_trap_regs *regs,
 	default:
 		ret = SBI_ENOTSUPP;
 		break;
-	};
+	}
 
 	if (ret)
 		sbi_dprintf("%s: hartid%d: invalid csr_num=0x%x\n",
@@ -172,9 +172,9 @@ int sbi_emulate_csr_write(int csr_num, struct sbi_trap_regs *regs,
 	int ret = 0;
 	ulong prev_mode = (regs->mstatus & MSTATUS_MPP) >> MSTATUS_MPP_SHIFT;
 #if __riscv_xlen == 32
-	bool virt = (regs->mstatusH & MSTATUSH_MPV) ? TRUE : FALSE;
+	bool virt = (regs->mstatusH & MSTATUSH_MPV) ? true : false;
 #else
-	bool virt = (regs->mstatus & MSTATUS_MPV) ? TRUE : FALSE;
+	bool virt = (regs->mstatus & MSTATUS_MPV) ? true : false;
 #endif
 
 	switch (csr_num) {
@@ -199,7 +199,7 @@ int sbi_emulate_csr_write(int csr_num, struct sbi_trap_regs *regs,
 	default:
 		ret = SBI_ENOTSUPP;
 		break;
-	};
+	}
 
 	if (ret)
 		sbi_dprintf("%s: hartid%d: invalid csr_num=0x%x\n",

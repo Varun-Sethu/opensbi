@@ -11,7 +11,6 @@
 #define __SBI_CONSOLE_H__
 
 #include <sbi/sbi_types.h>
-#include <sbi/sbi_hart.h>
 
 struct sbi_console_device {
 	/** Name of the console device */
@@ -19,6 +18,9 @@ struct sbi_console_device {
 
 	/** Write a character to the console output */
 	void (*console_putc)(char ch);
+
+	/** Write a character string to the console output */
+	unsigned long (*console_puts)(const char *str, unsigned long len);
 
 	/** Read a character from the console input */
 	int (*console_getc)(void);
@@ -34,7 +36,11 @@ void sbi_putc(char ch);
 
 void sbi_puts(const char *str);
 
+unsigned long sbi_nputs(const char *str, unsigned long len);
+
 void sbi_gets(char *s, int maxwidth, char endchar);
+
+unsigned long sbi_ngets(char *str, unsigned long len);
 
 int __printf(2, 3) sbi_sprintf(char *out, const char *format, ...);
 
@@ -44,6 +50,8 @@ int __printf(1, 2) sbi_printf(const char *format, ...);
 
 int __printf(1, 2) sbi_dprintf(const char *format, ...);
 
+void __printf(1, 2) __attribute__((noreturn)) sbi_panic(const char *format, ...);
+
 const struct sbi_console_device *sbi_console_get_device(void);
 
 void sbi_console_set_device(const struct sbi_console_device *dev);
@@ -52,23 +60,9 @@ struct sbi_scratch;
 
 int sbi_console_init(struct sbi_scratch *scratch);
 
-#define BUG() do { \
-	sbi_printf("BUG: failure at %s:%d/%s()!\n", \
-		   __FILE__, __LINE__, __func__); \
-	sbi_hart_hang(); \
-} while (0)
-
-#define BUG_ON(cond) do { \
-	if (cond)	\
-		BUG();	\
-} while (0)
-
-#define SBI_ASSERT(cond) do { \
-	if (!(cond)) { \
-		sbi_printf("ASSERT: %s:%d/%s(): Assertion `%s` failed.\n", \
-			   __FILE__,__LINE__,__func__, #cond);\
-		sbi_hart_hang(); \
-	} \
+#define SBI_ASSERT(cond, args) do { \
+	if (unlikely(!(cond))) \
+		sbi_panic args; \
 } while (0)
 
 #endif

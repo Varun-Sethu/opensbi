@@ -74,48 +74,22 @@ _try_lottery:
 	REG_L	t0, 0(t0)
 	/* t1 shall has the address of _fw_start */
 	sub	t2, t1, t0
-	lla	t3, _runtime_offset
-	REG_S	t2, (t3)
 	lla	t0, __rel_dyn_start
 	lla	t1, __rel_dyn_end
 	beq	t0, t1, _relocate_done
-	j	5f
 2:
-	REG_L	t5, -(REGBYTES*2)(t0)	/* t5 <-- relocation info:type */
+	REG_L	t5, REGBYTES(t0)	/* t5 <-- relocation info:type */
 	li	t3, R_RISCV_RELATIVE	/* reloc type R_RISCV_RELATIVE */
 	bne	t5, t3, 3f
-	REG_L	t3, -(REGBYTES*3)(t0)
-	REG_L	t5, -(REGBYTES)(t0)	/* t5 <-- addend */
+	REG_L	t3, 0(t0)
+	REG_L	t5, (REGBYTES * 2)(t0)	/* t5 <-- addend */
 	add	t5, t5, t2
 	add	t3, t3, t2
 	REG_S	t5, 0(t3)		/* store runtime address to the GOT entry */
-	j	5f
 
 3:
-	lla	t4, __dyn_sym_start
-
-4:
-	REG_L	t5, -(REGBYTES*2)(t0)	/* t5 <-- relocation info:type */
-	srli	t6, t5, SYM_INDEX	/* t6 <--- sym table index */
-	andi	t5, t5, 0xFF		/* t5 <--- relocation type */
-	li	t3, RELOC_TYPE
-	bne	t5, t3, 5f
-
-	/* address R_RISCV_64 or R_RISCV_32 cases*/
-	REG_L	t3, -(REGBYTES*3)(t0)
-	li	t5, SYM_SIZE
-	mul	t6, t6, t5
-	add	s5, t4, t6
-	REG_L	t6, -(REGBYTES)(t0)	/* t0 <-- addend */
-	REG_L	t5, REGBYTES(s5)
-	add	t5, t5, t6
-	add	t5, t5, t2		/* t5 <-- location to fix up in RAM */
-	add	t3, t3, t2		/* t3 <-- location to fix up in RAM */
-	REG_S	t5, 0(t3)		/* store runtime address to the variable */
-
-5:
-	addi	t0, t0, (REGBYTES*3)
-	ble	t0, t1, 2b
+	addi	t0, t0, (REGBYTES * 3)
+	blt	t0, t1, 2b
 	j	_relocate_done
 _wait_relocate_copy_done:
 	j	_wait_for_boot_hart
@@ -128,9 +102,9 @@ _relocate:
 	REG_L	t1, 0(t1)
 	lla	t2, _load_start
 	REG_L	t2, 0(t2)
+	beq	t0, t2, _relocate_done
 	sub	t3, t1, t0
 	add	t3, t3, t2
-	beq	t0, t2, _relocate_done
 	lla	t4, _relocate_done
 	sub	t4, t4, t2
 	add	t4, t4, t0
@@ -212,7 +186,7 @@ _relocate_done:
 
 	/* At this point we are running from link address */
 
-	/* Reset all registers for boot HART */
+	/* Reset all registers except ra, a0, a1 and a2 for boot HART */
 	li	ra, 0
 	call	_reset_regs
 
@@ -257,20 +231,28 @@ _bss_zero:
 	/* Preload HART details
 	 * s7 -> HART Count
 	 * s8 -> HART Stack Size
+	 * s9 -> Heap Size
+	 * s10 -> Heap Offset
 	 */
 	lla	a4, platform
-#if __riscv_xlen == 64
+#if __riscv_xlen > 32
 	lwu	s7, SBI_PLATFORM_HART_COUNT_OFFSET(a4)
 	lwu	s8, SBI_PLATFORM_HART_STACK_SIZE_OFFSET(a4)
+	lwu	s9, SBI_PLATFORM_HEAP_SIZE_OFFSET(a4)
 #else
 	lw	s7, SBI_PLATFORM_HART_COUNT_OFFSET(a4)
 	lw	s8, SBI_PLATFORM_HART_STACK_SIZE_OFFSET(a4)
+	lw	s9, SBI_PLATFORM_HEAP_SIZE_OFFSET(a4)
 #endif
 
 	/* Setup scratch space for all the HARTs*/
 	lla	tp, _fw_end
 	mul	a5, s7, s8
 	add	tp, tp, a5
+	/* Setup heap base address */
+	lla	s10, _fw_start
+	sub	s10, tp, s10
+	add	tp, tp, s9
 	/* Keep a copy of tp */
 	add	t3, tp, zero
 	/* Counter */
@@ -285,8 +267,11 @@ _scratch_init:
 	 * t3 -> the firmware end address
 	 * s7 -> HART count
 	 * s8 -> HART stack size
+	 * s9 -> Heap Size
+	 * s10 -> Heap Offset
 	 */
 	add	tp, t3, zero
+	sub	tp, tp, s9
 	mul	a5, s8, t1
 	sub	tp, tp, a5
 	li	a5, SBI_SCRATCH_SIZE
@@ -298,6 +283,16 @@ _scratch_init:
 	sub	a5, t3, a4
 	REG_S	a4, SBI_SCRATCH_FW_START_OFFSET(tp)
 	REG_S	a5, SBI_SCRATCH_FW_SIZE_OFFSET(tp)
+
+	/* Store R/W section's offset in scratch space */
+	lla	a5, _fw_rw_start
+	sub	a5, a5, a4
+	REG_S	a5, SBI_SCRATCH_FW_RW_OFFSET(tp)
+
+	/* Store fw_heap_offset and fw_heap_size in scratch space */
+	REG_S	s10, SBI_SCRATCH_FW_HEAP_OFFSET(tp)
+	REG_S	s9, SBI_SCRATCH_FW_HEAP_SIZE_OFFSET(tp)
+
 	/* Store next arg1 in scratch space */
 	MOV_3R	s0, a0, s1, a1, s2, a2
 	call	fw_next_arg1
@@ -361,7 +356,7 @@ _scratch_init:
 	/* t0 = source FDT start address */
 	add	t0, a1, zero
 	/* t2 = source FDT size in big-endian */
-#if __riscv_xlen == 64
+#if __riscv_xlen > 32
 	lwu	t2, 4(t0)
 #else
 	lw	t2, 4(t0)
@@ -402,8 +397,8 @@ _fdt_reloc_done:
 	/* mark boot hart done */
 	li	t0, BOOT_STATUS_BOOT_HART_DONE
 	lla	t1, _boot_status
-	REG_S	t0, 0(t1)
 	fence	rw, rw
+	REG_S	t0, 0(t1)
 	j	_start_warm
 
 	/* waiting for boot hart to be done (_boot_status == 2) */
@@ -412,23 +407,22 @@ _wait_for_boot_hart:
 	lla	t1, _boot_status
 	REG_L	t1, 0(t1)
 	/* Reduce the bus traffic so that boot hart may proceed faster */
-	nop
-	nop
-	nop
+	div	t2, t2, zero
+	div	t2, t2, zero
+	div	t2, t2, zero
 	bne	t0, t1, _wait_for_boot_hart
 
 _start_warm:
-	/* Reset all registers for non-boot HARTs */
+	/* Reset all registers except ra, a0, a1 and a2 for non-boot HARTs */
 	li	ra, 0
 	call	_reset_regs
 
-	/* Disable and clear all interrupts */
+	/* Disable all interrupts */
 	csrw	CSR_MIE, zero
-	csrw	CSR_MIP, zero
 
 	/* Find HART count and HART stack size */
 	lla	a4, platform
-#if __riscv_xlen == 64
+#if __riscv_xlen > 32
 	lwu	s7, SBI_PLATFORM_HART_COUNT_OFFSET(a4)
 	lwu	s8, SBI_PLATFORM_HART_STACK_SIZE_OFFSET(a4)
 #else
@@ -444,7 +438,7 @@ _start_warm:
 	beqz	s9, 3f
 	li	a4, 0
 1:
-#if __riscv_xlen == 64
+#if __riscv_xlen > 32
 	lwu	a5, (s9)
 #else
 	lw	a5, (s9)
@@ -453,7 +447,6 @@ _start_warm:
 	add	s9, s9, 4
 	add	a4, a4, 1
 	blt	a4, s7, 1b
-	li	a4, -1
 2:	add	s6, a4, zero
 3:	bge	s6, s7, _start_hang
 
@@ -505,10 +498,6 @@ _skip_trap_exit_rv32_hyp:
 
 	.data
 	.align 3
-#ifdef FW_PIC
-_runtime_offset:
-	RISCV_PTR	0
-#endif
 _relocate_lottery:
 	RISCV_PTR	0
 _boot_status:
@@ -532,7 +521,7 @@ _hartid_to_scratch:
 	 * t2 -> Temporary
 	 */
 	lla	t2, platform
-#if __riscv_xlen == 64
+#if __riscv_xlen > 32
 	lwu	t0, SBI_PLATFORM_HART_STACK_SIZE_OFFSET(t2)
 	lwu	t2, SBI_PLATFORM_HART_COUNT_OFFSET(t2)
 #else
@@ -560,6 +549,34 @@ _start_hang:
 fw_platform_init:
 	add	a0, a1, zero
 	ret
+
+	/* Map implicit memcpy() added by compiler to sbi_memcpy() */
+	.section .text
+	.align 3
+	.globl memcpy
+memcpy:
+	tail	sbi_memcpy
+
+	/* Map implicit memset() added by compiler to sbi_memset() */
+	.section .text
+	.align 3
+	.globl memset
+memset:
+	tail	sbi_memset
+
+	/* Map implicit memmove() added by compiler to sbi_memmove() */
+	.section .text
+	.align 3
+	.globl memmove
+memmove:
+	tail	sbi_memmove
+
+	/* Map implicit memcmp() added by compiler to sbi_memcmp() */
+	.section .text
+	.align 3
+	.globl memcmp
+memcmp:
+	tail	sbi_memcmp
 
 .macro	TRAP_SAVE_AND_SETUP_SP_T0
 	/* Swap TP and MSCRATCH */

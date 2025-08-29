@@ -22,6 +22,18 @@ union reg_data {
 	u64 data_u64;
 };
 
+static ulong sbi_misaligned_tinst_fixup(ulong orig_tinst, ulong new_tinst,
+					ulong addr_offset)
+{
+	if (new_tinst == INSN_PSEUDO_VS_LOAD ||
+	    new_tinst == INSN_PSEUDO_VS_STORE)
+		return new_tinst;
+	else if (orig_tinst == 0)
+		return 0UL;
+	else
+		return orig_tinst | (addr_offset << SH_RS1);
+}
+
 int sbi_misaligned_load_handler(ulong addr, ulong tval2, ulong tinst,
 				struct sbi_trap_regs *regs)
 {
@@ -117,6 +129,7 @@ int sbi_misaligned_load_handler(ulong addr, ulong tval2, ulong tinst,
 		uptrap.tval = addr;
 		uptrap.tval2 = tval2;
 		uptrap.tinst = tinst;
+		uptrap.gva   = sbi_regs_gva(regs);
 		return sbi_trap_redirect(regs, &uptrap);
 	}
 
@@ -126,6 +139,8 @@ int sbi_misaligned_load_handler(ulong addr, ulong tval2, ulong tinst,
 						&uptrap);
 		if (uptrap.cause) {
 			uptrap.epc = regs->mepc;
+			uptrap.tinst = sbi_misaligned_tinst_fixup(
+				tinst, uptrap.tinst, i);
 			return sbi_trap_redirect(regs, &uptrap);
 		}
 	}
@@ -196,16 +211,14 @@ int sbi_misaligned_store_handler(ulong addr, ulong tval2, ulong tinst,
 	} else if ((insn & INSN_MASK_C_SD) == INSN_MATCH_C_SD) {
 		len	       = 8;
 		val.data_ulong = GET_RS2S(insn, regs);
-	} else if ((insn & INSN_MASK_C_SDSP) == INSN_MATCH_C_SDSP &&
-		   ((insn >> SH_RD) & 0x1f)) {
+	} else if ((insn & INSN_MASK_C_SDSP) == INSN_MATCH_C_SDSP) {
 		len	       = 8;
 		val.data_ulong = GET_RS2C(insn, regs);
 #endif
 	} else if ((insn & INSN_MASK_C_SW) == INSN_MATCH_C_SW) {
 		len	       = 4;
 		val.data_ulong = GET_RS2S(insn, regs);
-	} else if ((insn & INSN_MASK_C_SWSP) == INSN_MATCH_C_SWSP &&
-		   ((insn >> SH_RD) & 0x1f)) {
+	} else if ((insn & INSN_MASK_C_SWSP) == INSN_MATCH_C_SWSP) {
 		len	       = 4;
 		val.data_ulong = GET_RS2C(insn, regs);
 #ifdef __riscv_flen
@@ -230,6 +243,7 @@ int sbi_misaligned_store_handler(ulong addr, ulong tval2, ulong tinst,
 		uptrap.tval = addr;
 		uptrap.tval2 = tval2;
 		uptrap.tinst = tinst;
+		uptrap.gva   = sbi_regs_gva(regs);
 		return sbi_trap_redirect(regs, &uptrap);
 	}
 
@@ -238,6 +252,8 @@ int sbi_misaligned_store_handler(ulong addr, ulong tval2, ulong tinst,
 			     &uptrap);
 		if (uptrap.cause) {
 			uptrap.epc = regs->mepc;
+			uptrap.tinst = sbi_misaligned_tinst_fixup(
+				tinst, uptrap.tinst, i);
 			return sbi_trap_redirect(regs, &uptrap);
 		}
 	}

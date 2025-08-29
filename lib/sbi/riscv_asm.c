@@ -53,7 +53,7 @@ int misa_xlen(void)
 void misa_string(int xlen, char *out, unsigned int out_sz)
 {
 	unsigned int i, pos = 0;
-	const char valid_isa_order[] = "iemafdqclbjtpvnsuhkorwxyzg";
+	const char valid_isa_order[] = "iemafdqclbjtpvnhkorwxyzg";
 
 	if (!out)
 		return;
@@ -76,7 +76,8 @@ void misa_string(int xlen, char *out, unsigned int out_sz)
 			out[pos++] = '8';
 			break;
 		default:
-			BUG();
+			sbi_panic("%s: Unknown misa.MXL encoding %d",
+				   __func__, xlen);
 			return;
 		}
 	}
@@ -126,6 +127,13 @@ unsigned long csr_read_num(int csr_num)
 	switchcase_csr_read_4(CSR_MHPMCOUNTER4, ret)
 	switchcase_csr_read_8(CSR_MHPMCOUNTER8, ret)
 	switchcase_csr_read_16(CSR_MHPMCOUNTER16, ret)
+	switchcase_csr_read(CSR_MCOUNTINHIBIT, ret)
+	switchcase_csr_read(CSR_MCYCLECFG, ret)
+	switchcase_csr_read(CSR_MINSTRETCFG, ret)
+	switchcase_csr_read(CSR_MHPMEVENT3, ret)
+	switchcase_csr_read_4(CSR_MHPMEVENT4, ret)
+	switchcase_csr_read_8(CSR_MHPMEVENT8, ret)
+	switchcase_csr_read_16(CSR_MHPMEVENT16, ret)
 #if __riscv_xlen == 32
 	switchcase_csr_read(CSR_MCYCLEH, ret)
 	switchcase_csr_read(CSR_MINSTRETH, ret)
@@ -133,12 +141,26 @@ unsigned long csr_read_num(int csr_num)
 	switchcase_csr_read_4(CSR_MHPMCOUNTER4H, ret)
 	switchcase_csr_read_8(CSR_MHPMCOUNTER8H, ret)
 	switchcase_csr_read_16(CSR_MHPMCOUNTER16H, ret)
+	/**
+	 * The CSR range M[CYCLE, INSTRET]CFGH are available only if smcntrpmf
+	 * extension is present. The caller must ensure that.
+	 */
+	switchcase_csr_read(CSR_MCYCLECFGH, ret)
+	switchcase_csr_read(CSR_MINSTRETCFGH, ret)
+	/**
+	 * The CSR range MHPMEVENT[3-16]H are available only if sscofpmf
+	 * extension is present. The caller must ensure that.
+	 */
+	switchcase_csr_read(CSR_MHPMEVENT3H, ret)
+	switchcase_csr_read_4(CSR_MHPMEVENT4H, ret)
+	switchcase_csr_read_8(CSR_MHPMEVENT8H, ret)
+	switchcase_csr_read_16(CSR_MHPMEVENT16H, ret)
 #endif
 
 	default:
-		BUG();
+		sbi_panic("%s: Unknown CSR %#x", __func__, csr_num);
 		break;
-	};
+	}
 
 	return ret;
 
@@ -192,17 +214,25 @@ void csr_write_num(int csr_num, unsigned long val)
 	switchcase_csr_write_4(CSR_MHPMCOUNTER4H, val)
 	switchcase_csr_write_8(CSR_MHPMCOUNTER8H, val)
 	switchcase_csr_write_16(CSR_MHPMCOUNTER16H, val)
+	switchcase_csr_write(CSR_MCYCLECFGH, val)
+	switchcase_csr_write(CSR_MINSTRETCFGH, val)
+	switchcase_csr_write(CSR_MHPMEVENT3H, val)
+	switchcase_csr_write_4(CSR_MHPMEVENT4H, val)
+	switchcase_csr_write_8(CSR_MHPMEVENT8H, val)
+	switchcase_csr_write_16(CSR_MHPMEVENT16H, val)
 #endif
 	switchcase_csr_write(CSR_MCOUNTINHIBIT, val)
+	switchcase_csr_write(CSR_MCYCLECFG, val)
+	switchcase_csr_write(CSR_MINSTRETCFG, val)
 	switchcase_csr_write(CSR_MHPMEVENT3, val)
 	switchcase_csr_write_4(CSR_MHPMEVENT4, val)
 	switchcase_csr_write_8(CSR_MHPMEVENT8, val)
 	switchcase_csr_write_16(CSR_MHPMEVENT16, val)
 
 	default:
-		BUG();
+		sbi_panic("%s: Unknown CSR %#x", __func__, csr_num);
 		break;
-	};
+	}
 
 #undef switchcase_csr_write_64
 #undef switchcase_csr_write_32
@@ -228,6 +258,48 @@ static unsigned long ctz(unsigned long x)
 	return ret;
 }
 
+int pmp_disable(unsigned int n)
+{
+	int pmpcfg_csr, pmpcfg_shift;
+	unsigned long cfgmask, pmpcfg;
+
+	if (n >= PMP_COUNT)
+		return SBI_EINVAL;
+
+#if __riscv_xlen == 32
+	pmpcfg_csr   = CSR_PMPCFG0 + (n >> 2);
+	pmpcfg_shift = (n & 3) << 3;
+#elif __riscv_xlen == 64
+	pmpcfg_csr   = (CSR_PMPCFG0 + (n >> 2)) & ~1;
+	pmpcfg_shift = (n & 7) << 3;
+#else
+# error "Unexpected __riscv_xlen"
+#endif
+
+	/* Clear the address matching bits to disable the pmp entry */
+	cfgmask = ~(0xffUL << pmpcfg_shift);
+	pmpcfg	= (csr_read_num(pmpcfg_csr) & cfgmask);
+
+	csr_write_num(pmpcfg_csr, pmpcfg);
+
+	return SBI_OK;
+}
+
+int is_pmp_entry_mapped(unsigned long entry)
+{
+	unsigned long prot;
+	unsigned long addr;
+	unsigned long log2len;
+
+	pmp_get(entry, &prot, &addr, &log2len);
+
+	/* If address matching bits are non-zero, the entry is enable */
+	if (prot & PMP_A)
+		return true;
+
+	return false;
+}
+
 int pmp_set(unsigned int n, unsigned long prot, unsigned long addr,
 	    unsigned long log2len)
 {
@@ -247,14 +319,12 @@ int pmp_set(unsigned int n, unsigned long prot, unsigned long addr,
 	pmpcfg_csr   = (CSR_PMPCFG0 + (n >> 2)) & ~1;
 	pmpcfg_shift = (n & 7) << 3;
 #else
-	pmpcfg_csr   = -1;
-	pmpcfg_shift = -1;
+# error "Unexpected __riscv_xlen"
 #endif
 	pmpaddr_csr = CSR_PMPADDR0 + n;
-	if (pmpcfg_csr < 0 || pmpcfg_shift < 0)
-		return SBI_ENOTSUPP;
 
 	/* encode PMP config */
+	prot &= ~PMP_A;
 	prot |= (log2len == PMP_SHIFT) ? PMP_A_NA4 : PMP_A_NAPOT;
 	cfgmask = ~(0xffUL << pmpcfg_shift);
 	pmpcfg	= (csr_read_num(pmpcfg_csr) & cfgmask);
@@ -300,12 +370,9 @@ int pmp_get(unsigned int n, unsigned long *prot_out, unsigned long *addr_out,
 	pmpcfg_csr   = (CSR_PMPCFG0 + (n >> 2)) & ~1;
 	pmpcfg_shift = (n & 7) << 3;
 #else
-	pmpcfg_csr   = -1;
-	pmpcfg_shift = -1;
+# error "Unexpected __riscv_xlen"
 #endif
 	pmpaddr_csr = CSR_PMPADDR0 + n;
-	if (pmpcfg_csr < 0 || pmpcfg_shift < 0)
-		return SBI_ENOTSUPP;
 
 	/* decode PMP config */
 	cfgmask = (0xffUL << pmpcfg_shift);
