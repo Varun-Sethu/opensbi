@@ -303,6 +303,10 @@
 #define CSR_HPMCOUNTER30H		0xc9e
 #define CSR_HPMCOUNTER31H		0xc9f
 
+/** temp */
+#define CSR_FENCE_T_PAD			0x7C3
+#define CSR_FENCE_T_CEIL        0x7C5
+
 /* ===== Supervisor-level CSRs ===== */
 
 /* Supervisor Trap Setup */
