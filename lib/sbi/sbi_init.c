@@ -314,12 +314,8 @@ static void __noreturn init_coldboot(struct sbi_scratch *scratch, u32 hartid)
 		sbi_hart_hang();
 	}
 
-	rc = sbi_hart_pmp_configure(scratch);
-	if (rc) {
-		sbi_printf("%s: PMP configure failed (error %d)\n",
-			   __func__, rc);
-		sbi_hart_hang();
-	}
+	// rc = sbi_hart_pmp_configure(scratch);
+	sbi_printf("HI!\n");
 
 	/*
 	 * Note: Platform final initialization should be last so that

@@ -45,6 +45,7 @@ static bool hpm_allowed(int hpm_num, ulong prev_mode, bool virt)
 int sbi_emulate_csr_read(int csr_num, struct sbi_trap_regs *regs,
 			 ulong *csr_val)
 {
+	sbi_printf("HI!\n");
 	int ret = 0;
 	struct sbi_scratch *scratch = sbi_scratch_thishart_ptr();
 	ulong prev_mode = (regs->mstatus & MSTATUS_MPP) >> MSTATUS_MPP_SHIFT;

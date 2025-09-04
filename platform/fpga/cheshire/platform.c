@@ -84,6 +84,8 @@ static int cheshire_early_init(bool cold_boot)
 	if (!rc)
 		uart = uart_data;
 
+	// enable reading the timer without trapping
+	csr_write(CSR_MCOUNTEREN, csr_read(CSR_MCOUNTEREN) | (1UL << 1));
 	return 0;
 }
 

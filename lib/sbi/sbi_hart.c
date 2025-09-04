@@ -226,13 +226,13 @@ int sbi_hart_pmp_configure(struct sbi_scratch *scratch)
 			pmp_flags |= PMP_L;
 
 		pmp_addr =  reg->base >> PMP_SHIFT;
-		if (pmp_gran_log2 <= reg->order && pmp_addr < pmp_addr_max)
-			pmp_set(pmp_idx++, pmp_flags, reg->base, reg->order);
-		else {
 			sbi_printf("Can not configure pmp for domain %s", dom->name);
 			sbi_printf("because memory region address %lx or size %lx is not in range\n",
 				    reg->base, reg->order);
-		}
+
+		(void) pmp_addr_max;
+		(void) pmp_addr;
+		(void) pmp_gran_log2;
 	}
 
 	return 0;
